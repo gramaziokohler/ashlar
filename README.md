@@ -1,6 +1,6 @@
 # Stone property computation
 
-This repository is provided as a supplement to the paper `Multimodal Robotic Construction with On-Site Materials'.  Given a closed triangular mesh (i.e. representing a stone), we provide methods for computing meta-faces using iterative variational shape approximation, mass properties, and the "ashlarness" metric.
+This repository is provided as a supplement to the paper _Multimodal Robotic Construction with On-Site Materials_.  Given a closed triangular mesh (i.e. representing a stone), we provide methods for computing meta-faces using iterative variational shape approximation, mass properties, and the "ashlarness" metric.
 
 ## See the tutorial first
 
