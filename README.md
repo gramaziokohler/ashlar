@@ -1,8 +1,6 @@
-# libigl example project
+# Stone property computation
 
-A blank project example showing how to use libigl and cmake. Feel free and
-encouraged to copy or fork this project as a way of starting a new personal
-project using libigl.
+This repository is provided as a supplement to the paper `Multimodal Robotic Construction with On-Site Materials'.  Given a closed triangular mesh (i.e. representing a stone), we provide methods for computing meta-faces using iterative variational shape approximation, mass properties, and the "ashlarness" metric.
 
 ## See the tutorial first
 
