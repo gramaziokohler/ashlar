@@ -28,8 +28,7 @@ via `cmake-gui` or `ccmake`.
 
 Compile this project using the standard cmake routine:
 
-    mkdir build
-    cd build
+    mkdir build && cd build
     cmake ..
     make
 
