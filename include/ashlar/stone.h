@@ -1,10 +1,9 @@
 #ifndef EXAMPLE_SRC_STONE_H_
 #define EXAMPLE_SRC_STONE_H_
 
-
-#include "eigen_stl_vector_specialization.h"
+#include <fstream>
 #include <Eigen/Core>
-
+#include "eigen_stl_vector_specialization.h"
 #include "ashlar/properties.h"
 
 namespace ashlar {
@@ -20,9 +19,10 @@ class Stone {
   void SetDensity(double density);
   void Reorient();   //reorient the stone such that its eigenvectors are aligned to the world reference frame, and it is centered on its centroid
   void ComputeProperties(); //compute key properties such as bounding box, surface area, and mass properties
-  void ComputeVSA(); //compute variational shape approximation for this rock
+  void ComputeVSA(int max_clusters, int subiterations, double max_error); //compute variational shape approximation for this rock
+  void ComputeAshlarness();  //compute the ashlarness metric for this stone
   void PrintProperties(); //print the key stone properties to the console
-
+  void LogProperties(std::ofstream& logger);
   void Downsample();  //downsample the mesh with consistent face sizes
 
   /*!
@@ -59,9 +59,13 @@ class Stone {
   ashlar::BoxProperties aabb_;
   //store our mass properties
   ashlar::MassProperties mass_props_;
+  //store our VSA properties
+  ashlar::VsaProperties vsa_;
+  double ashlarness_ = 0.0;  //store ashlarness for this stone
 
  private:
   double density_ = 2800.0;  //density in kg/m3 (asuming mesh units are meters)
+  std::string filename_;
 };
 }
 

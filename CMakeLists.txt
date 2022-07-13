@@ -11,6 +11,7 @@ include(libigl)
 set(SOURCES
         src/main.cpp
         src/stone.cpp
+        src/four_color.cpp
         src/variational_shape_approximation.cpp
         )
 

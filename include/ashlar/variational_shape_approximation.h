@@ -8,11 +8,13 @@
 #include <vector>
 #include <map>
 
+#include "ashlar/properties.h"
+
 namespace ashlar{
 // Divide a mesh into subsurface clusters using Variational Shape Approximation.
 // David Cohen-Steiner, Pierre Alliez, and Mathieu Desbrun. Variational shape approximation. ACM Transactions on Graphics, 23(3):905-914, August 2004.
-// With additional example information from the python script kmeans.py by Jesus Galvez.
-//
+// For a python (Rhino/GH) implementation, see kmeans.py by Jesus Galvez: https://www.grasshopper3d.com/forum/topics/k-means-clustering-on-meshes
+
 struct VsaParams {
   int max_clusters = 25; //if our resolution is set super high, stop before we get here
   int subiterations = 10; //how many subiterations per loop
@@ -20,6 +22,12 @@ struct VsaParams {
   bool verbose = false;
 };
 
+
+void VariationalShapeApproximation(
+    const ashlar::VsaParams& params,
+    const ashlar::MeshProperties& mesh,
+    ashlar::VsaProperties& vsa
+    );
 // Inputs:
 //	 V	#V by 3 list of vertices
 //   F  #F by 3 list of triangle indices

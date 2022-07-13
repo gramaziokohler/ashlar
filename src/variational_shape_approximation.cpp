@@ -16,6 +16,87 @@
 #include <math.h>       /* acos */
 #include <set>
 
+#include "igl/slice.h"
+#include "igl/parula.h"
+
+#include "fourcolor/four_color.h"
+
+void ashlar::VariationalShapeApproximation(
+    const ashlar::VsaParams& params,
+    const ashlar::MeshProperties& mesh,
+    ashlar::VsaProperties& vsa
+){
+  //simplified interface for calling sub-methods below
+  //Eigen::VectorXi rKey; //for each face, get the region index that it is in
+
+  Eigen::MatrixXi adjacency_matrix;
+  adjacency_matrix.setZero(params.max_clusters, params.max_clusters);  //create adjacency matrix
+  ashlar::variational_shape_approximation(mesh.V,
+                                       mesh.F,
+                                       params,
+                                       vsa.region_key,
+                                       adjacency_matrix,
+                                       vsa.proxy_faces,
+                                       vsa.region_centers,
+                                       vsa.region_normals,
+                                       vsa.region_faces,
+                                       vsa.region_face_indices); //this gets clusters with a set error and max K, building up from 4 until error is satisfied
+
+  //std::cout << "Rock Region Centers:\n" << vsa_.region_centers << "\n";
+  //use our face and adjacency relationship to give us the angle between adjacent faces
+  //Note: this returns the dot product result (-1 to 1), not an angle in radians or degrees
+  ashlar::adjacency_angles(adjacency_matrix, vsa.region_normals, vsa.inter_angles);
+
+  //get edges as inputs for finding region edges and anchors
+  Eigen::MatrixXi E; //#edges x 2 matrix of indices in V that make up edges
+  igl::edges(mesh.F, E); //get all of our edges completely unsorted
+
+  //setup outputs for anchors and edges function
+  //flattened (unlinked to region type) matrix of 3d midpoints, #found midpoints x 3 (does not necessarily match adjacency count)
+  Eigen::MatrixXd MP;
+  std::map<int, std::map<int, Eigen::RowVector3d>> frame_x_axes;
+  std::map<int, std::map<int, Eigen::RowVector3d>> frame_y_axes;
+  ashlar::find_anchors_and_edges(mesh.V,
+                              mesh.F,
+                              E,
+                              vsa.region_key,
+                              vsa.region_centers,
+                              vsa.region_normals,
+                              adjacency_matrix,
+                              MP,
+                              vsa.adjacencies,
+                              vsa.edge_paths,
+                              vsa.edge_center_proxies,
+                              vsa.edge_centers,
+                              frame_x_axes,
+                              frame_y_axes,
+                              vsa.edge_frames,
+                              vsa.stable_adjacencies,
+                              vsa.edge_lengths,
+                              vsa.edge_dirs);
+
+  vsa.region_count = vsa.region_key.maxCoeff() + 1;
+  //get the largest item in this face list to tell us how many components we have
+  std::cout << "This mesh has " << vsa.region_count << " meta-faces.\n";
+
+  //get a flattened list of edge centers from our map for use with finding signatures
+  vsa.flattened_edge_centers.setZero(vsa.adjacencies.rows(), 3);
+  for (int i = 0; i < vsa.flattened_edge_centers.rows(); i++) {
+    vsa.flattened_edge_centers.row(i) = vsa.edge_centers.at(vsa.adjacencies(i, 0)).at(vsa.adjacencies(i, 1));
+  }
+
+  //get color scheme of regions based on adjacency matrix
+  fourcolor::four_color_theorem(adjacency_matrix, vsa.region_color_key);
+
+  //vsa.region_key is a #F x 1 vector indicating the index of the region each face belongs to
+  //vsa.region_color_key is a #region x 1 vector indicating a color index (0-4) for each region
+
+  Eigen::VectorXi face_color_key;  //store the color key value (0-4) for each face
+  igl::slice(vsa.region_color_key, vsa.region_key,face_color_key);
+
+  //convert color indices to color values evenly spaced on the parula spectrum
+  igl::parula(face_color_key, true, vsa.per_face_colors);
+}
 //this version solves for a fixed number of k_clusters with a given number of n_iterations
 void ashlar::variational_shape_approximation(const Eigen::MatrixXd &V,
                                           const Eigen::MatrixXi &F,
@@ -147,9 +228,6 @@ void ashlar::variational_shape_approximation(const Eigen::MatrixXd &V,
 
   face_error worst = face_error();
 
-  //std::cout << "V: " << V.rows() << " F " << F.rows() << " FN " << FN.rows() << " F0 " << FN.row(0) << "\n";
-  //std::cout << TT;
-
   bool withinErrorThreshold = false; //are we within the specified error threshold?
 
   while (!withinErrorThreshold && k_clusters < params.max_clusters) {  //while we haven't hit our error threshold, and we are below our max number of clusters
@@ -189,7 +267,6 @@ void ashlar::variational_shape_approximation(const Eigen::MatrixXd &V,
       Eigen::MatrixXi adjacency_matrix;
       adjacency_matrix.setZero(regions.size(), regions.size());
       find_adjacent_regions(TT, regions, adjacency_matrix);
-      //std::cout << "ADJACENCY MATRIX: \n" << adjacency_matrix << "\n";
 
       //find and combine the most similar
       combine_regions(FC, WFN, FN, FA, TT, regions, adjacency_matrix);
@@ -353,7 +430,6 @@ void ashlar::get_proxy_seed(std::vector<prox_region> &proxies, const Eigen::Matr
   //iterate through each face listed in a proxy region to determine which one has the least metric error
   //this becomes our seed face from which the proxy will grow
   //regionProxyFaces.setZero(proxyFaces.size());
-  //std::cout << "\nGET PROXY SEED: \n";
   for (int i = 0; i < proxies.size(); i++) { //for each proxy
     Eigen::VectorXd errors;
     std::vector<face_error> faceErrors;
@@ -363,7 +439,6 @@ void ashlar::get_proxy_seed(std::vector<prox_region> &proxies, const Eigen::Matr
     double leastError = errors.minCoeff(&seedProxyFaceIndex); //get the least error and the index of our proxyfaces with the least error
     int seedFaceIndex = proxies.at(i).faces.at(seedProxyFaceIndex); //get the actual face index of our whole mesh from the proxy face with the least error
     proxies.at(i).proxyFace = seedFaceIndex;
-    //std::cout << seedFaceIndex << "\n";
   }
 }
 
@@ -405,7 +480,6 @@ void ashlar::build_queue(const std::vector<prox_region> &regions,
     //for each region
     //int seedIndex =
     int seedIndex = regions.at(i).faces.at(0);
-    //std::cout << "SEED INDEX: " << seedIndex << "\n";
     assignedIndices.push_back(seedIndex); //the seed faces are already accounted for
     std::vector<int> seed_neighbors;
     for (int j = 0; j < TT.row(seedIndex).size(); j++) { //convert eigen row to vector (maybe find an eigen-y way of doing this?)
@@ -428,7 +502,6 @@ void ashlar::update_queue(const prox_region &region, const Eigen::MatrixXd &FN, 
 
   queue.insert(queue.end(), newFaceErrors.begin(), newFaceErrors.end()); //add our new errors into our old ones
   sort(queue.begin(), queue.end(), [](const face_error &a, const face_error &b) { return (a._error < b._error); });
-  //std::cout << "\nUPDATED QUEUE.  Min Error is: " << queue.front()._error << " max error is: " << queue.back()._error << "\n";
 }
 
 //adds the errors of each face in the seed_neighbors face list to the queue, as measured against the normal of the region.  Does not sort the queue.
@@ -448,7 +521,6 @@ void ashlar::update_queue_new(const prox_region &region, const Eigen::MatrixXd &
     structError.face_id = index;
     structError.region_id = regionIndex;
     queue.push_back(structError); //add our face error to this list
-    //std::push_heap(queue.begin(), queue.end()); //not sure if necessary, but should readjust heap
   }
 }
 
@@ -603,7 +675,6 @@ void ashlar::assign_to_wost_regions(const Eigen::MatrixXd &FN,
       if (unique_neighbors.size() > 0) {//if there are any left
         //update our queue with these neighbors
         update_queue_new(splitRegions.at(regionIndex), FN, FA, unique_neighbors, heapq);
-        //update_queue(splitRegions.at(regionIndex), FN, FA, unique_neighbors, heapq);
         std::push_heap(heapq.begin(), heapq.end(), [](const face_error &a, const face_error &b) { return (a._error > b._error); });
       }
     }
@@ -846,7 +917,7 @@ edgeMap[commonRegions.at(0)][commonRegions.at(1)].push_back(i); //put this edge 
 
 //our edge map should now have correct edges stored in correct bins, but unordered.  Now we need to go through those bins and chain the edges together in order
 //this can be tricky if there are multiple edges per region adjacency, but if we don't consider this case, there is a libigl function for this!
-//should modify in the future to check if there are more than 2 unique values in the list, in which case we would need to make two or more edge lists per region adjaceny
+//should modify in the future to check if there are more than 2 unique values in the list, in which case we would need to make two or more edge lists per region adjacency
 std::vector<Eigen::RowVector3d> mps;
 std::vector<Eigen::RowVector2i> mpAdjacencies; //this stores the actual adjacencies that we've found midpoints for, which might be a subset of adjacencies if we have a crenellated face, etc.
 stable_adjacency_matrix.setZero(adjacency_matrix.rows(), adjacency_matrix.cols());  //set our stable matrix to zero (should be similar to adjacency matrix but with some missing 1s
@@ -986,8 +1057,6 @@ break; // leave this edge and go to the next adjacency
 }
 }
 std::cout << "Number of Edge Midpoints Found: " << mps.size() << " \n";
-//std::cout << "Face Adjacency Matrix:\n";
-//std::cout << adjacency_matrix << "\n";
 
 MP.setZero(mps.size(), 3); //convert our list of midpoints to a flattened eigen matrix
 for (int i = 0; i < MP.rows(); i++) {

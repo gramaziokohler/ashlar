@@ -1,26 +1,28 @@
 #include "ashlar/stone.h"
 
-#include "igl/read_triangle_mesh.h"
+#include <math.h>
 
-#include <igl/edges.h>
-#include <igl/decimate.h>
 #include "igl/volume.h"
+#include "igl/decimate.h"
+#include "igl/centroid.h"
+#include "igl/doublearea.h"
 #include "igl/barycenter.h"
 #include "igl/adjacency_list.h"
-#include "igl/triangle_triangle_adjacency.h"
-#include "igl/loop.h"
-#include "igl/centroid.h"
-#include "igl/per_corner_normals.h"
-#include "igl/per_vertex_normals.h"
 #include "igl/per_face_normals.h"
+#include "igl/read_triangle_mesh.h"
 #include "igl/random_points_on_mesh.h"
+#include "igl/triangle_triangle_adjacency.h"
+
+#include "ashlar/variational_shape_approximation.h"
 
 ashlar::Stone::Stone(){
-
 }
 
 ashlar::Stone::Stone(std::string filename){
-  igl::read_triangle_mesh(filename,mesh_.V,mesh_.F);
+  filename_ = filename;
+  std::cout<< "=========================================\n";
+  std::cout<< "File: " << filename_ << "\n";
+  igl::read_triangle_mesh(filename_,mesh_.V,mesh_.F);
 }
 
 void ashlar::Stone::SetDensity(double density){
@@ -40,6 +42,7 @@ double ashlar::Stone::ComputeVolume(const Eigen::MatrixXd& verts, const Eigen::M
 }
 
 void ashlar::Stone::ComputeProperties(){
+  std::cout << "Computing mesh properties...\n";
   //get mesh volume
   mass_props_.volume = ComputeVolume(mesh_.V,mesh_.F);
 
@@ -47,6 +50,7 @@ void ashlar::Stone::ComputeProperties(){
   Eigen::VectorXd face_areas;
   igl::doublearea(mesh_.V,mesh_.F, face_areas);  // 2* the area of each face #F x 1
   mass_props_.surface_area = face_areas.sum() / 2.0;
+  mass_props_.sphericity = (pow(M_PI,(1.0/3.0))*pow(6.0*mass_props_.volume,(2.0/3.0)))/mass_props_.surface_area;
 
   //get mass properties
   MassProps(mesh_.V, mesh_.F, density_, mass_props_);
@@ -61,15 +65,131 @@ void ashlar::Stone::ComputeProperties(){
   aabb_.height = dim[2];
   aabb_.diagonal = dim.norm();  // get the length of our aabb_diagonal to give us another metric of general rock size
 
+  //store corners of our box for plotting
+  aabb_.corners.setZero(8,3);
+  aabb_.corners <<
+      aabb_.min(0), aabb_.min(1), aabb_.min(2),
+      aabb_.max(0), aabb_.min(1), aabb_.min(2),
+      aabb_.max(0), aabb_.max(1), aabb_.min(2),
+      aabb_.min(0), aabb_.max(1), aabb_.min(2),
+      aabb_.min(0), aabb_.min(1), aabb_.max(2),
+      aabb_.max(0), aabb_.min(1), aabb_.max(2),
+      aabb_.max(0), aabb_.max(1), aabb_.max(2),
+      aabb_.min(0), aabb_.max(1), aabb_.max(2);
+
+  //edges always reference the same corners
+  aabb_.edges.setZero(12,2);
+  aabb_.edges<<
+      0, 1,
+      1, 2,
+      2, 3,
+      3, 0,
+      4, 5,
+      5, 6,
+      6, 7,
+      7, 4,
+      0, 4,
+      1, 5,
+      2, 6,
+      7 ,3;
+
   //compute form factors (3D rectangularity, elongation, flatness)
   double aabb_volume = aabb_.width * aabb_.length * aabb_.height;
   aabb_.rectangularity = mass_props_.volume / aabb_volume;
   aabb_.elongation = aabb_.length / aabb_.height;
   aabb_.flatness = aabb_.width / aabb_.length;
+
 }
 
-void ashlar::Stone::ComputeVSA() {
+void ashlar::Stone::ComputeVSA(int max_clusters, int subiterations, double max_error) {
+  std::cout << "Computing iterative shape approximation...\n";
+  ashlar::VsaParams params;
+  params.max_clusters = max_clusters; //if our resolution is set super high, stop before we get here
+  params.subiterations = subiterations; //how many subiterations per loop
+  params.max_error = max_error; //target weighted normal error per region
+  ashlar::VariationalShapeApproximation(params,mesh_,vsa_);
+}
 
+void ashlar::Stone::ComputeAshlarness() {
+  double min_size = mass_props_.surface_area * .02;  //arbitrary smallest allowable surface area for a primary meta-face in ashlarness metric
+  int min_count = 2;  //fewest triangles allowed to consider a meta-face as primary ashlarness face (in case there are small islands)
+  int skip_count = 0; //count how many faces we skipped due to the above restrictions
+
+  std::vector<Eigen::RowVector3d> normal_vectors;  //store the normal vectors of all non-skipped regions
+  std::vector<double> pseudoface_areas;  //store the total area of all non-skipped pseudoface regions
+  int proxy_pseudoface = 0;  //store the index of the face that is most closely aligned to the broad axis of the bounding box (either side), weighted by area
+  double closest_alignment = -1.0;  //get the area weighted alignment of the proxy pseudoface with the "broad normal" of the bounding box
+  Eigen::RowVector3d broad_normal = Eigen::RowVector3d::UnitX();  //it is assumed that our objects are aligned such that the largest bounding box face is perpendicular to the x axis
+  Eigen::RowVector3d aligned_normal = Eigen::RowVector3d::UnitX();  //the normal of the face that is most closely aligned to the x axis considering area weighting
+
+  //precompute properties of vsa meta-faces, and find the region that is most closely aligned with the broad face of the bounding box
+  for (int i = 0; i < vsa_.region_faces.size(); i++) {
+    //Extract the mesh of each meta-face region
+    Eigen::VectorXi IM, inRows;
+    Eigen::MatrixXd VC;
+    Eigen::MatrixXi FC;
+    igl::remove_unreferenced(mesh_.V, vsa_.region_faces.at(i), VC, FC, IM, inRows); //remove all unused verts/faces
+
+    //get the area of this region
+    Eigen::VectorXd ps_area;
+    igl::doublearea(VC,FC, ps_area); //2* the area of each face #F x 1
+    double total_area = ps_area.sum() / 2.0;
+
+    //recompute the normals for this region and get the weighted average normal
+    Eigen::MatrixXd recomputed_norms;
+    igl::per_face_normals(VC, FC, recomputed_norms);
+    recomputed_norms = recomputed_norms.array().colwise() * ps_area.array();
+    Eigen::RowVector3d average_norm = recomputed_norms.colwise().mean();
+    average_norm.normalize();
+
+    if(total_area > min_size && VC.rows() > min_count){
+      //store the area and normal of this region for later use
+      normal_vectors.push_back(vsa_.region_normals.row(i));
+      pseudoface_areas.push_back(total_area);
+
+      //get how closely this face approximates our broad face (area weighted)
+      double alignment_score = total_area * abs(broad_normal.dot(vsa_.region_normals.row(i)));
+      if(alignment_score > closest_alignment){
+        //this is our best-yet meta-face in terms of being aligned with the bounding box broad-face
+        proxy_pseudoface = normal_vectors.size()-1;  //our current object is the best
+        closest_alignment = alignment_score;
+        aligned_normal = vsa_.region_normals.row(i);
+      }
+    }
+    else{
+      skip_count++;
+    }
+  }
+
+  //get area of whole stone again (in case this was done before downsampling)
+  Eigen::VectorXd rock_face_areas;
+  igl::doublearea(mesh_.V,mesh_.F,rock_face_areas); //2* the area of each face #F x 1
+  double rock_area = rock_face_areas.sum() / 2.0;
+
+  //get area of most aligned area weighted pseudoface
+  double area_1 = pseudoface_areas.at(proxy_pseudoface);
+
+  //find best ashlarness value
+  double best_ashlarness = -1.0;
+
+  for(int i=0; i<normal_vectors.size(); i++){
+    if(i != proxy_pseudoface){  //don't compare with self
+      double alignment = aligned_normal.dot(normal_vectors.at(i));  //get alignment between this face and the proxy meta face
+      if(alignment < 0){  //they need to be opposing faces for ashlarness metric
+        double curr_area = pseudoface_areas.at(i);  //area of this meta face
+        double curr_area_ratio = area_1 > curr_area ? curr_area / area_1 : area_1 / curr_area;  //area ratio between these two meta faces
+        double curr_flat_ratio = (area_1 + curr_area) / rock_area;  //what percentage of the total rock area are these flat faces?
+        double curr_alignment = abs(alignment);  //how aligned are the faces? (absolute value of dot product)
+        double curr_ashlarness = (curr_area_ratio + curr_flat_ratio + curr_alignment*curr_alignment)/3;  //ashlarness
+        if(curr_ashlarness > best_ashlarness){
+          best_ashlarness = curr_ashlarness;
+        }
+      }
+    }
+  }
+
+  //save our computed value
+  ashlarness_ = best_ashlarness;
 }
 
 void ashlar::Stone::PrintProperties() {
@@ -80,16 +200,33 @@ void ashlar::Stone::PrintProperties() {
   std::cout<< "Length: " << aabb_.length << "\n";
   std::cout<< "Height: " << aabb_.height << "\n";
   std::cout<< "3D Rectangularity: " << aabb_.rectangularity << "\n";
+  std::cout<< "Sphericity: " << mass_props_.sphericity << "\n";
   std::cout<< "Flatness: " << aabb_.flatness << "\n";
   std::cout<< "Elongation: " << aabb_.elongation << "\n";
+  std::cout<< "Ashlarness: " << ashlarness_ << "\n";
+  std::cout<< "=========================================\n";
+}
+
+void ashlar::Stone::LogProperties(std::ofstream& logger){
+  //FILE,VOLUME,WIDTH,LENGTH,HEIGHT,FLATNESS,ELONGATION,RECTANGULARITY,SPHERICITY,METAFACES,ASHLARNESS
+  logger<<filename_<<",";
+  logger<<mass_props_.volume<<",";
+  logger<<aabb_.width<<",";
+  logger<<aabb_.length<<",";
+  logger<<aabb_.height<<",";
+  logger<<aabb_.flatness<<",";
+  logger<<aabb_.elongation<<",";
+  logger<<aabb_.rectangularity<<",";
+  logger<<mass_props_.sphericity<<",";
+  logger<<vsa_.region_count<<",";
+  logger<<ashlarness_<<"\n";
 }
 
 void ashlar::Stone::ComputeRotation(const Eigen::MatrixXd& verts, Eigen::Matrix3d& rotation) {
   // use PCA to reorient our rock
-  Eigen::MatrixXd Y = verts.rowwise() - verts.colwise().mean();  // each point minus the centroid m
-  Eigen::MatrixXd S = Y.adjoint() * Y;                           // scatterMatrix S = Y * Y.transpose();
-  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> eigs(S,
-                                                      Eigen::ComputeEigenvectors);  // get the eigen vectors and values
+  Eigen::MatrixXd Y = verts.rowwise() - verts.colwise().mean();
+  Eigen::MatrixXd S = Y.adjoint() * Y;
+  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> eigs(S,Eigen::ComputeEigenvectors);
 
   Eigen::Matrix3d xform_a = Eigen::Matrix3d::Identity() * eigs.eigenvectors();
   Eigen::Vector3d x_axis = xform_a.col(0).normalized();
@@ -136,21 +273,23 @@ void ashlar::Stone::Reorient(){
 }
 
 void ashlar::Stone::Downsample(){
+    std::cout << "Downsampling...\n";
     //downsampling to somewhat evenly sized faces speeds up the VSA calculation
     //and improves the consistency of the results with the exisiting dataset
-    //for the purpose of this example, downsample to a given number of faces
-    //determined by scaling the volume to our typical volume of 1/3 m3
-    //and then getting a number of faces based on a fixed density of 500 faces/m2
+    //for the purpose of this example, I downsample to a given number of faces
+    //determined by scaling the volume to our typical volume of about 1/3 m3
+    //and then getting a number of faces that object would have given surface area
+    //and based on a fixed density of 500 faces/m2
     double target_volume = 0.33;
     double face_density = 500.0;
     double scale_factor = cbrt(target_volume / mass_props_.volume);
-    double scaled_area = scale_factor*mass_props_.surface_area;
+    double scaled_area = scale_factor*scale_factor*mass_props_.surface_area;
     int num_samples = ceil(face_density*scaled_area);
     Eigen::VectorXi J, I; //references to original birth faces and birth vertices
     Eigen::MatrixXd v_temp = mesh_.V;
     Eigen::MatrixXi f_temp = mesh_.F;
     igl::decimate(v_temp, f_temp, num_samples, mesh_.V, mesh_.F, J, I);
-    std::cout << "Mesh decimated from " << f_temp.rows() << " to " << mesh_.F.rows() << " faces for VSA approximation.\n";
+    std::cout << "Mesh decimated from " << f_temp.rows() << " to " << mesh_.F.rows() << " faces.\n";
 }
 
 // compute mass properties from mesh
@@ -182,7 +321,7 @@ void ashlar::Stone::MassProps(const Eigen::MatrixXd& V, const Eigen::MatrixXi& F
     Eigen::Vector3d h6 = h3.array() + b.array() * (h1.array() + b.array());
     Eigen::Vector3d h7 = h3.array() + c.array() * (h1.array() + c.array());
     Eigen::Vector3d a_bar;
-    a_bar << a[1], a[2], a[0];  // see notation reference from http://baecher.info/publications/spin_it_sup_mat_sig14.pdf
+    a_bar << a[1], a[2], a[0];
     Eigen::Vector3d b_bar;
     b_bar << b[1], b[2], b[0];
     Eigen::Vector3d c_bar;
