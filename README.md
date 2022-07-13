@@ -1,7 +1,7 @@
 # Ashlar:  Mesh Properties for Stone Datasets
 
 This repository is provided as a supplement to the paper _Multimodal Robotic Construction with On-Site Materials_.  
-Given a closed triangular mesh (i.e. representing a stone), we provide methods for computing meta-faces using iterative variational shape approximation, form and mass properties, and the ashlarness metric.
+For closed triangular meshes (i.e. representing stones), we provide methods for computing meta-faces using iterative variational shape approximation, form and mass properties, and the ashlarness metric.
 
 ## Dependencies
 This project uses the geometry processing library [libigl](http://libigl.github.io/libigl/), 
@@ -64,7 +64,17 @@ via `cmake-gui` or `ccmake`.
 ## References
 The Variational Shape Approximation approach for finding meta-faces is documented in
 
+```
+@inproceedings{
+}
+```
+
 Mass properties are computed using the method described in
+
+```
+@inproceedings{
+}
+```
 
 For the visualization of meta-faces, with non-overlappling colors, we use the four color implementation of [okaydemir](https://github.com/okaydemir/4-color-theorem), modified for a simplified eigen interface.
 
