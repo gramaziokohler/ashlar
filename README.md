@@ -3,10 +3,10 @@
 This repository is provided as a supplement to the paper _Multimodal Robotic Construction with On-Site Materials_.  
 For closed triangular meshes (i.e. representing stones), we provide methods for computing meta-faces using iterative variational shape approximation, form and mass properties, and the ashlarness metric.
 
-### _ashlar_ noun
-[ash·lar | \ ˈash-lər  \](https://www.merriam-webster.com/dictionary/ashlar)
-*1* :hewn or squared stone
-_also_:masonry of such stone
+### _ashlar_ [noun](https://www.merriam-webster.com/dictionary/ashlar)
+_ash·lar_ | \ _ˈash-lər_  \ <br/>
+**1:** hewn or squared stone <br/>
+_also_ **:** masonry of such stone
 
 ## Dependencies
 This project uses the geometry processing library [libigl](http://libigl.github.io/libigl/), 
