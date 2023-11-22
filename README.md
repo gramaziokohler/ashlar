@@ -91,10 +91,19 @@ When changing this value, do not forget to clear your `CMakeCache.txt`, or to up
 via `cmake-gui` or `ccmake`.
 
 ## References
-If using this repository for academic work, we thank you for citing [Multimodal Robotic Construction with On-Site Materials]()
+If using this repository for academic work, we thank you for citing [A framework for robotic excavation and dry stone construction using on-site materials](https://www.science.org/doi/full/10.1126/scirobotics.abp9758)
 
 ```
-BibTeX information forthcoming
+@article{johns_framework_2023,
+	title = {A framework for robotic excavation and dry stone construction using on-site materials},
+	volume = {8},
+	doi = {10.1126/scirobotics.abp9758},
+	number = {84},
+	journal = {Science Robotics},
+	author = {Johns, Ryan Luke and Wermelinger, Martin and Mascaro, Ruben and Jud, Dominic and Hurkxkens, Ilmar and Vasey, Lauren and Chli, Margarita and Gramazio, Fabio and Kohler, Matthias and Hutter, Marco},
+	month = nov,
+	year = {2023},
+}
 ```
 
 The [Variational Shape Approximation](https://doi.org/10.1145/1015706.1015817) approach for finding meta-faces is presented in
